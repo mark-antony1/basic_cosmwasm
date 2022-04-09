@@ -1,12 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Addr, StdError};
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{OwnerResponse, CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{State, STATE};
-
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:counter";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -19,7 +18,6 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        count: msg.count,
         owner: info.sender.clone(),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -28,7 +26,7 @@ pub fn instantiate(
     Ok(Response::new()
         .add_attribute("method", "instantiate")
         .add_attribute("owner", info.sender)
-        .add_attribute("count", msg.count.to_string()))
+    )
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -39,63 +37,59 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
-        ExecuteMsg::UpdateOwner { owner } => try_update_owner(deps, info, owner),
+        ExecuteMsg::StartGame { opponent } => try_start_game(deps, info, opponent.to_string()),
+        // ExecuteMsg::UpdateOwner { owner } => try_update_owner(deps, info, owner),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
-    })?;
-
-    Ok(Response::new().add_attribute("method", "try_increment"))
-}
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
-        }
-        state.count = count;
-        Ok(state)
-    })?;
-    Ok(Response::new().add_attribute("method", "reset"))
-}
-
-pub fn try_update_owner(
+pub fn try_start_game(
     deps: DepsMut,
     info: MessageInfo,
-    owner: String,
+    opponent: String,
 ) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
+    let checked: StdResult<Addr> = deps.api.addr_validate(&opponent);
+    match checked {
+        Ok(_) => {
+            Ok(Response::new().add_attribute("method", "start_game"))
+
         }
-        state.owner = Addr::unchecked(owner);
-        Ok(state)
-    })?;
-    Ok(Response::new().add_attribute("method", "update_owner"))
+        Err(e) => Err(ContractError::InvalidLength{}),
+    }
+
 }
+
+// pub fn try_update_owner(
+//     deps: DepsMut,
+//     info: MessageInfo,
+//     owner: String,
+// ) -> Result<Response, ContractError> {
+//     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
+//         if info.sender != state.owner {
+//             return Err(ContractError::Unauthorized {});
+//         }
+//         state.owner = Addr::unchecked(owner);
+//         Ok(state)
+//     })?;
+//     Ok(Response::new().add_attribute("method", "update_owner"))
+// }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
-        QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
+        // QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        // QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
     }
 }
 
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
-}
+// fn query_count(deps: Deps) -> StdResult<CountResponse> {
+//     let state = STATE.load(deps.storage)?;
+//     Ok(CountResponse { count: state.count })
+// }
 
-fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(OwnerResponse { owner: state.owner.to_string() })
-}
+// fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
+//     let state = STATE.load(deps.storage)?;
+//     Ok(OwnerResponse { owner: state.owner.to_string() })
+// }
 
 #[cfg(test)]
 mod tests {
@@ -104,90 +98,53 @@ mod tests {
     use cosmwasm_std::{coins, from_binary};
 
     #[test]
-    fn proper_initialization() {
+    fn proper_initialization_and_start_game() {
         let mut deps = mock_dependencies(&[]);
 
-        let msg = InstantiateMsg { count: 17 };
+        let msg = InstantiateMsg { };
         let info = mock_info("creator", &coins(1000, "earth"));
 
         // we can just call .unwrap() to assert this was a success
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(17, value.count);
-    }
-
-    #[test]
-    fn increment() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Increment {};
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // should increase counter by 1
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(18, value.count);
-    }
-
-    #[test]
-    fn update_owner() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // should have owner of creator
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
-        let value: OwnerResponse = from_binary(&res).unwrap();
-        assert_eq!("creator", value.owner);
-
         // beneficiary can release it
         let info = mock_info("creator", &coins(2, "token"));
-        let msg = ExecuteMsg::UpdateOwner { owner: "anyone".to_string() };
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // should have owner of anyone now
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
-        let value: OwnerResponse = from_binary(&res).unwrap();
-        assert_eq!("anyone", value.owner);
-    }
-
-    #[test]
-    fn reset() {
-        let mut deps = mock_dependencies(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let unauth_info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-        match res {
-            Err(ContractError::Unauthorized {}) => {}
-            _ => panic!("Must return unauthorized error"),
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("a") };
+        let res = execute(deps.as_mut(), mock_env(), info, msg);
+        match res.unwrap_err() {
+            ContractError::InvalidLength {} => assert_eq!(true, true),
+            e => panic!("Unexpected error: {}", e),
         }
 
-        // only the original creator can reset the counter
-        let auth_info = mock_info("creator", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-
-        // should now be 5
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(5, value.count);
+        // it worked, let's query the state
+        let info = mock_info("creator", &coins(2, "token"));
+        let msg = ExecuteMsg::StartGame { opponent: Addr::unchecked("terra1dcegyrekltswvyy0xy69ydgxn9x8x32zdtapd8")};
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(Response::new().add_attribute("method", "start_game"), res);
     }
+
+    // #[test]
+    // fn update_owner() {
+    //     let mut deps = mock_dependencies(&coins(2, "token"));
+
+    //     let msg = InstantiateMsg { count: 17 };
+    //     let info = mock_info("creator", &coins(2, "token"));
+    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    //     // should have owner of creator
+    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
+    //     let value: OwnerResponse = from_binary(&res).unwrap();
+    //     assert_eq!("creator", value.owner);
+
+    //     // beneficiary can release it
+    //     let info = mock_info("creator", &coins(2, "token"));
+    //     let msg = ExecuteMsg::UpdateOwner { owner: "anyone".to_string() };
+    //     let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+    //     // should have owner of anyone now
+    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
+    //     let value: OwnerResponse = from_binary(&res).unwrap();
+    //     assert_eq!("anyone", value.owner);
+    // }
 }
