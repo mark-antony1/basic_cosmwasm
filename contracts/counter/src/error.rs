@@ -8,6 +8,8 @@ pub enum ContractError {
 
     #[error("Unauthorized")]
     Unauthorized {},
+    #[error("You can only enter your own address")]
+    WrongAddress {},
     #[error("InvalidLength")]
     InvalidLength {},
     // Add any other custom errors you like here.
